@@ -1,0 +1,42 @@
+version: "3"
+services:
+  weather-redis:
+    container_name: weather-redis
+    image: redis
+    ports:
+       - "6381:6379"
+    networks:
+      weather-network:
+        aliases:
+          - weather-redis
+        ipv4_address: 10.5.0.4
+  backend:
+     container_name: backend
+     build: ./openresty
+     depends_on:
+       - weather-redis
+     links:
+       - weather-redis
+     volumes:
+      - ./openresty/conf.d:/etc/nginx/conf.d
+      - ./openresty/nginx.conf:/etc/nginx.conf
+    #  environment:
+    #   # LUA_PATH: /opt/openresty/lua-resty-redis/lib/?.lua;;
+    #   LUA_PATH: /opt/openresty/?/lib/?.lua;;      
+     ports:
+       - "8090:8080"
+     expose:
+       - 8090
+     networks:
+       weather-network:
+         aliases:
+           - weather-backend
+         ipv4_address: 10.5.0.5
+
+networks:
+  weather-network:  
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.5.0.0/16
+          # gateway: 10.5.0.1
