@@ -15,7 +15,6 @@ function make_request(url, data, method)
         ngx.log(ngx.ERR, "request failed: ", err)
         return
     end
-
     
     local status = res.status
     local length = res.headers["Content-Length"]
@@ -37,44 +36,37 @@ end
 
 local args = ngx.req.get_uri_args()
 
-local city_ru = args.city
-local city_en = city_ru
-
--- city_ru = request.rel_url.query['city']
--- city_en = get_translation(city_ru, 'ru', 'en')
+local city = args.city
 
 local redis = require "resty.redis" -- подключим библиотеку по работе с redis
 local red = redis:new()
 red:set_timeout(1000) -- 1 sec
 
 local ok, err = red:connect("10.5.0.4", 6379)
-res, err = red:get(city_en); -- получим данные из redis
-
 local weather = ""
 local date = os.time(os.date("!*t"))
 
-local from_cache = false
-local result = {city=city_ru, weather="", date=date, from_cache=from_cache}
+local result = {city=city, weather="", date=date, from_cache=false}
 
-if res ~= ngx.null then
-    local _res = cjson.decode(res)    
-    if (date - _res["date"]) > 10 then
-        weather = get_weather(city_en)
-    else
-        weather = _res["weather"]
-        from_cache=true
-    end
-else
-    weather = get_weather(city_en)    
+local ttl = -2
+ttl, err = red:ttl(city); -- получим ttl по ключу
+
+if ttl < 0 then 
+    -- Если ttl меньше 0, то считаем, что данные устарели (ttl = -1) или были добавлены без expire (ttl = -2).
+    -- В любом случае имеет смысл получить новые данные
+    weather = get_weather(city)
+    red:set(city, cjson.encode({ weather=weather, date=date }))
+    red:expire(city, 10)
 end
 
-result["weather"]=weather
-result["from_cache"]=from_cache
+res, err = red:get(city)
 
-local enc_result = cjson.encode(result)
-if not from_cache then
-    red:set(city_en, enc_result)
-end
+res = cjson.decode(res)
+
+result["ttl"] = ttl
+result["weather"] = res["weather"]
+result["date"] = res["date"]
+result["from_cache"] = ttl > 0
 
 ngx.header["Content-type"] = 'application/json'
-ngx.say(enc_result)
+ngx.say(cjson.encode(result))
